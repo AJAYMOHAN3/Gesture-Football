@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Football - Multiplayer Hand Tracking Game</title>
+    <meta name="description" content="Play an exciting multiplayer penalty shootout game using hand gesture controls. Be a kicker or goalie in this innovative camera-based football game.">
+    <meta name="author" content="Gesture Football">
+    <meta name="keywords" content="gesture control, hand tracking, football game, penalty shootout, multiplayer, camera game, AI">
+
+    <meta property="og:title" content="Gesture Football - Multiplayer Hand Tracking Game">
+    <meta property="og:description" content="Play an exciting multiplayer penalty shootout game using hand gesture controls. Be a kicker or goalie in this innovative camera-based football game.">
+    <meta property="og:type" content="website">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.22.0/dist/tf-backend-webgl.min.js"></script>
+    <!-- Hand Pose Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2.0.1/dist/hand-pose-detection.min.js"></script>
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+
+    <style>
+        #video, #canvas {
+  transform: scaleX(-1); /* flip horizontally */
+}
+
+        /* Football Stadium Design System - All colors, gradients, fonts, etc defined here */
+        :root {
+            --background: 120 50% 96%;
+            --foreground: 0 0% 12%;
+            --card: 0 0% 100%;
+            --card-foreground: 0 0% 12%;
+            --popover: 0 0% 100%;
+            --popover-foreground: 0 0% 12%;
+            --primary: 120 60% 25%;
+            --primary-foreground: 0 0% 98%;
+            --secondary: 200 100% 60%;
+            --secondary-foreground: 0 0% 98%;
+            --muted: 120 30% 92%;
+            --muted-foreground: 0 0% 45%;
+            --accent: 25 95% 55%;
+            --accent-foreground: 0 0% 98%;
+            --destructive: 0 84% 60%;
+            --destructive-foreground: 0 0% 98%;
+            --border: 120 30% 85%;
+            --input: 120 30% 90%;
+            --ring: 120 60% 25%;
+            --radius: 0.75rem;
+
+            /* Football theme colors */
+            --grass-primary: 120 60% 25%;
+            --grass-light: 120 50% 35%;
+            --grass-dark: 120 70% 15%;
+            --sky-blue: 200 100% 60%;
+            --soccer-orange: 25 95% 55%;
+            --field-white: 0 0% 98%;
+            --stadium-gray: 220 10% 20%;
+
+            /* Gradients */
+            --gradient-field: linear-gradient(135deg, hsl(var(--grass-primary)), hsl(var(--grass-light)));
+            --gradient-sky: linear-gradient(180deg, hsl(var(--sky-blue)), hsl(200 80% 75%));
+            --gradient-celebration: linear-gradient(45deg, hsl(var(--soccer-orange)), hsl(45 100% 60%));
+            --gradient-stadium: linear-gradient(180deg, hsl(var(--stadium-gray)), hsl(220 15% 35%));
+
+            /* Shadows */
+            --shadow-field: 0 10px 30px -5px hsl(var(--grass-dark) / 0.3);
+            --shadow-ball: 0 8px 25px -5px hsl(var(--soccer-orange) / 0.4);
+            --shadow-celebration: 0 0 40px hsl(var(--soccer-orange) / 0.6);
+
+            /* Animations */
+            --transition-kick: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            --transition-save: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        .dark {
+            --background: 120 70% 8%;
+            --foreground: 0 0% 95%;
+            --card: 120 60% 12%;
+            --card-foreground: 0 0% 95%;
+            --primary: 120 50% 45%;
+            --secondary: 200 80% 40%;
+            --grass-primary: 120 50% 45%;
+            --grass-light: 120 40% 55%;
+            --grass-dark: 120 60% 25%;
+            --sky-blue: 200 80% 40%;
+            --soccer-orange: 25 85% 50%;
+            --field-white: 0 0% 95%;
+            --stadium-gray: 220 15% 12%;
+        }
+
+        * {
+            border-color: hsl(var(--border));
+        }
+
+        body {
+            background-color: hsl(var(--background));
+            color: hsl(var(--foreground));
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        /* Football field pattern */
+        .field-pattern::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: 
+                linear-gradient(90deg, transparent 48%, hsl(var(--field-white) / 0.3) 49%, hsl(var(--field-white) / 0.3) 51%, transparent 52%),
+                linear-gradient(0deg, transparent 48%, hsl(var(--field-white) / 0.3) 49%, hsl(var(--field-white) / 0.3) 51%, transparent 52%);
+            background-size: 60px 60px;
+            pointer-events: none;
+        }
+
+        /* Goal celebration animation */
+        @keyframes goal-celebration {
+            0% { transform: scale(1) rotate(0deg); }
+            25% { transform: scale(1.1) rotate(5deg); }
+            50% { transform: scale(1.15) rotate(-5deg); }
+            75% { transform: scale(1.05) rotate(3deg); }
+            100% { transform: scale(1) rotate(0deg); }
+        }
+
+        @keyframes save-celebration {
+            0% { transform: translateX(0); }
+            20% { transform: translateX(-10px); }
+            40% { transform: translateX(10px); }
+            60% { transform: translateX(-5px); }
+            80% { transform: translateX(5px); }
+            100% { transform: translateX(0); }
+        }
+
+        @keyframes ball-kick {
+            0% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-20px) scale(0.8); }
+            100% { transform: translateY(0) scale(1); }
+        }
+
+        .animate-goal { animation: goal-celebration 0.6s ease-out; }
+        .animate-save { animation: save-celebration 0.4s ease-out; }
+        .animate-kick { animation: ball-kick 0.8s ease-out; }
+
+        /* Component styles */
+        .card {
+            background-color: hsl(var(--card));
+            color: hsl(var(--card-foreground));
+            border: 1px solid hsl(var(--border));
+            border-radius: var(--radius);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: calc(var(--radius) - 2px);
+            font-size: 0.75rem;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .badge-primary {
+            background-color: hsl(var(--primary));
+            color: hsl(var(--primary-foreground));
+        }
+
+        .badge-secondary {
+            background-color: hsl(var(--secondary));
+            color: hsl(var(--secondary-foreground));
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: calc(var(--radius) - 2px);
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: var(--transition-kick);
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-ball);
+        }
+
+        .btn-kicker {
+            background: var(--gradient-celebration);
+            color: hsl(var(--accent-foreground));
+        }
+
+        .btn-goalie {
+            background-color: hsl(var(--secondary));
+            color: hsl(var(--secondary-foreground));
+        }
+
+        .btn-outline {
+            border: 1px solid hsl(var(--border));
+            background-color: transparent;
+            color: hsl(var(--foreground));
+        }
+
+        .btn-xl {
+            padding: 1rem 2rem;
+            font-size: 1.125rem;
+        }
+
+        .btn-lg {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+        }
+
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+
+        .hidden { display: none; }
+        .text-field { color: hsl(var(--field-white)); }
+        .toast {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            background-color: hsl(var(--card));
+            color: hsl(var(--card-foreground));
+            padding: 1rem;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-field);
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        .toast-destructive {
+            background-color: hsl(var(--destructive));
+            color: hsl(var(--destructive-foreground));
+        }
+
+        /* Stadium background */
+        .stadium-bg {
+            background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><defs><linearGradient id="sky" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:hsl(200,100%,60%);stop-opacity:1" /><stop offset="100%" style="stop-color:hsl(200,80%,75%);stop-opacity:1" /></linearGradient><linearGradient id="field" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:hsl(120,60%,25%);stop-opacity:1" /><stop offset="100%" style="stop-color:hsl(120,50%,35%);stop-opacity:1" /></linearGradient></defs><rect width="1200" height="400" fill="url(%23sky)"/><rect y="400" width="1200" height="400" fill="url(%23field)"/><ellipse cx="600" cy="600" rx="200" ry="50" fill="hsl(120,70%,15%)" opacity="0.5"/></svg>');
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Landing Page -->
+    <div id="landing-page" class="min-h-screen bg-cover bg-center bg-no-repeat relative field-pattern stadium-bg">
+        <div class="absolute inset-0 bg-black/40"></div>
+        <div class="relative z-10 min-h-screen flex items-center justify-center p-4">
+            <div class="w-full max-w-4xl mx-auto text-center">
+                <!-- Header -->
+                <div class="mb-12">
+                    <div class="flex justify-center mb-6">
+                        <div class="w-24 h-24 animate-kick drop-shadow-lg bg-soccer-orange rounded-full flex items-center justify-center text-4xl">⚽</div>
+                    </div>
+                    <h1 class="text-6xl md:text-7xl font-bold text-field mb-4 drop-shadow-lg">
+                        Gesture Football
+                    </h1>
+                    <p class="text-xl md:text-2xl text-field/90 mb-8 drop-shadow">
+                        Use hand gestures to play penalty shootouts!
+                    </p>
+                    <div class="badge badge-secondary text-lg px-6 py-3 mb-8">
+                        🎮 Multiplayer • 📷 Camera Required • ✋ Hand Tracking
+                    </div>
+                </div>
+
+                <!-- Role Selection Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                    <div class="card p-8 bg-white/90 backdrop-blur-sm hover:scale-105 transition-transform duration-300">
+                        <div class="text-center mb-6">
+                            <div class="text-6xl mb-4">⚽</div>
+                            <h2 class="text-3xl font-bold mb-2">Goal Kicker</h2>
+                            <p class="text-gray-600 mb-4">
+                                Use hand gestures to aim your shots and score goals!
+                            </p>
+                            <ul class="text-sm text-gray-500 space-y-1">
+                                <li>• Aim with hand positions</li>
+                                <li>• Score 5 goals to win</li>
+                                <li>• 10 attempts maximum</li>
+                            </ul>
+                        </div>
+                        <button class="btn btn-kicker btn-xl w-full" onclick="startGame('kicker')">
+                            Be a Goal Kicker
+                        </button>
+                    </div>
+
+                    <div class="card p-8 bg-white/90 backdrop-blur-sm hover:scale-105 transition-transform duration-300">
+                        <div class="text-center mb-6">
+                            <div class="text-6xl mb-4">🥅</div>
+                            <h2 class="text-3xl font-bold mb-2">Goal Saver</h2>
+                            <p class="text-gray-600 mb-4">
+                                Use hand gestures to predict and block incoming shots!
+                            </p>
+                            <ul class="text-sm text-gray-500 space-y-1">
+                                <li>• Block with hand positions</li>
+                                <li>• Prevent 5 goals to win</li>
+                                <li>• Read the kicker's moves</li>
+                            </ul>
+                        </div>
+                        <button class="btn btn-goalie btn-xl w-full" onclick="startGame('goalie')">
+                            Be a Goal Saver
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Features -->
+                <div class="text-center">
+                    <h3 class="text-2xl font-bold text-field mb-4">How It Works</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-field/90">
+                        <div class="bg-black/20 rounded-lg p-4 backdrop-blur-sm"style="background-color: rgb(243, 236, 236);">
+                            <div class="text-3xl mb-2">📷</div>
+                            <h4 class="font-semibold mb-1">Camera Detection</h4>
+                            <p class="text-sm">Uses your device camera to track hand movements</p>
+                        </div>
+                        <div class="bg-black/20 rounded-lg p-4 backdrop-blur-sm" style="background-color: rgba(214, 200, 200, 0.648);">
+                            <div class="text-3xl mb-2">✋</div>
+                            <h4 class="font-semibold mb-1">Gesture Control</h4>
+                            <p class="text-sm">Move your hands to control game actions</p>
+                        </div>
+                        <div class="bg-black/20 rounded-lg p-4 backdrop-blur-sm" style="background-color: rgb(243, 236, 236);">
+                            <div class="text-3xl mb-2">🌐</div>
+                            <h4 class="font-semibold mb-1">Multiplayer Ready</h4>
+                            <p class="text-sm">Play with friends on different devices</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Page -->
+    <div id="game-page" class="hidden min-h-screen bg-cover bg-center bg-no-repeat relative field-pattern stadium-bg">
+        <div class="absolute inset-0 bg-black/30"></div>
+        <div class="relative z-10 min-h-screen p-4">
+            <!-- Header -->
+            <div class="flex justify-between items-center mb-6">
+                <button class="btn btn-outline btn-sm" onclick="goHome()">
+                    ← Back to Home
+                </button>
+                <div class="flex gap-4 items-center">
+                    <div class="badge badge-secondary text-lg px-4 py-2" id="round-badge">
+                        Round 1/10
+                    </div>
+                    <div class="badge badge-primary text-lg px-4 py-2" id="score-badge">
+                        Kicker: 0 - Goalie: 0
+                    </div>
+                </div>
+            </div>
+
+            <div class="max-w-4xl mx-auto">
+                <div class="text-center mb-8">
+                    <h1 class="text-4xl font-bold text-field mb-2">
+                        Gesture Football
+                    </h1>
+                    <div class="badge badge-primary text-xl px-6 py-2" id="role-badge">
+                        You are the KICKER
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Camera Section -->
+                    <div class="card p-6 bg-white/90 backdrop-blur-sm">
+                        <h2 class="text-2xl font-bold mb-4">Camera View</h2>
+                        <div class="relative">
+                            <video
+                                id="video"
+                                autoplay
+                                playsinline
+                                muted
+                                class="w-full max-w-md mx-auto rounded-lg"
+                                width="640"
+                                height="480"
+                            ></video>
+                            <canvas
+                                id="canvas"
+                                width="640"
+                                height="480"
+                                class="absolute top-0 left-0 w-full max-w-md mx-auto"
+                            ></canvas>
+                        </div>
+                        
+                        <div id="loading-message" class="text-center mt-4">
+                            <p class="text-gray-600">Loading hand tracking model...</p>
+                        </div>
+                        
+                        <div id="camera-error" class="text-center mt-4 hidden">
+                            <p class="text-red-600">Please allow camera access</p>
+                        </div>
+                    </div>
+
+                    <!-- Game Controls -->
+                    <div class="card p-6 bg-white/90 backdrop-blur-sm">
+                        <h2 class="text-2xl font-bold mb-4">Game Controls</h2>
+                        
+                        <div class="mb-6">
+                            <h3 class="text-lg font-semibold mb-2">Current Gesture:</h3>
+                            <div class="badge badge-primary text-lg px-4 py-2" id="gesture-badge">
+                                No gesture detected
+                            </div>
+                        </div>
+
+                        <div class="mb-6">
+                            <h3 class="text-lg font-semibold mb-2">Instructions:</h3>
+                            <p class="text-gray-600 mb-2" id="instructions">
+                                Move your hand to aim your shot!
+                            </p>
+                            <ul class="text-sm text-gray-500 space-y-1">
+                                <li>• Left/Right: Side positions</li>
+                                <li>• Top/Bottom: High/Low positions</li>
+                                <li>• Center: Middle position</li>
+                                <li>• Corners: Diagonal positions</li>
+                            </ul>
+                        </div>
+
+                        <div class="space-y-4">
+                            <button 
+                                id="action-button"
+                                class="btn btn-kicker btn-xl w-full"
+                                onclick="handleGameAction()"
+                            >
+                                ⚽ KICK!
+                            </button>
+                            
+                            <div id="fallback-message" class="text-center text-sm text-gray-500 hidden">
+                                <p>Hand tracking not available. Click the button to use random gestures.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game End Page -->
+    <div id="end-page" class="hidden min-h-screen bg-cover bg-center bg-no-repeat relative stadium-bg">
+        <div class="absolute inset-0 bg-black/40"></div>
+        <div class="relative z-10 min-h-screen flex items-center justify-center p-4">
+            <div class="card w-full max-w-md p-8 text-center bg-white/90 backdrop-blur-sm">
+                <div class="mb-6">
+                    <div class="w-16 h-16 mx-auto mb-4 animate-goal bg-soccer-orange rounded-full flex items-center justify-center text-2xl">⚽</div>
+                    <h1 class="text-3xl font-bold mb-2" id="result-title">Kicker Wins! 🎉</h1>
+                    <p class="text-lg text-gray-600" id="final-score">
+                        Final Score: Kicker 5 - 0 Goalie
+                    </p>
+                </div>
+                <div class="space-y-4">
+                    <button class="btn btn-kicker btn-xl w-full" onclick="resetGame()">
+                        Play Again
+                    </button>
+                    <button class="btn btn-outline btn-lg w-full" onclick="goHome()">
+                        Back to Home
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script>
+        // Game State
+        let currentPage = 'landing';
+        let gameRole = 'kicker';
+        let gameState = 'waiting';
+        let score = { kicker: 0, goalie: 0, round: 1, maxRounds: 10 };
+        let currentGesture = null;
+        let detector = null;
+        let isModelLoading = true;
+        let cameraReady = false;
+        let video, canvas, ctx;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+        });
+
+        // Toast system
+        function showToast(title, description, variant = 'default') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${variant === 'destructive' ? 'toast-destructive' : ''}`;
+            toast.innerHTML = `
+                <div class="font-semibold">${title}</div>
+                <div class="text-sm opacity-90">${description}</div>
+            `;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // Navigation
+        function startGame(role) {
+            gameRole = role;
+            currentPage = 'game';
+            showPage('game-page');
+            updateUI();
+            initializeGame();
+        }
+
+        function goHome() {
+            currentPage = 'landing';
+            showPage('landing-page');
+            stopCamera();
+        }
+
+        function showPage(pageId) {
+            document.getElementById('landing-page').classList.add('hidden');
+            document.getElementById('game-page').classList.add('hidden');
+            document.getElementById('end-page').classList.add('hidden');
+            document.getElementById(pageId).classList.remove('hidden');
+        }
+
+        function updateUI() {
+            const roleBadge = document.getElementById('role-badge');
+            const roundBadge = document.getElementById('round-badge');
+            const scoreBadge = document.getElementById('score-badge');
+            const actionButton = document.getElementById('action-button');
+            const instructions = document.getElementById('instructions');
+
+            if (roleBadge) roleBadge.textContent = `You are the ${gameRole.toUpperCase()}`;
+            if (roundBadge) roundBadge.textContent = `Round ${score.round}/${score.maxRounds}`;
+            if (scoreBadge) scoreBadge.textContent = `Kicker: ${score.kicker} - Goalie: ${score.goalie}`;
+            
+            if (actionButton) {
+                actionButton.textContent = gameRole === 'kicker' ? '⚽ KICK!' : '🥅 SAVE!';
+                actionButton.className = `btn ${gameRole === 'kicker' ? 'btn-kicker' : 'btn-goalie'} btn-xl w-full`;
+            }
+            
+            if (instructions) {
+                instructions.textContent = gameRole === 'kicker' 
+                    ? "Move your hand to aim your shot!" 
+                    : "Move your hand to block the shot!";
+            }
+        }
+
+        // Game initialization
+        async function initializeGame() {
+            await initializeModel();
+            await initializeCamera();
+            startHandDetection();
+        }
+
+        async function initializeModel() {
+            try {
+                console.log('Starting TensorFlow initialization...');
+                await tf.ready();
+                console.log('TensorFlow ready, creating hand detector...');
+                
+                const model = handPoseDetection.SupportedModels.MediaPipeHands;
+                const detectorConfig = {
+                    runtime: 'mediapipe',
+                    solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands',
+                    modelType: 'lite',
+                    maxHands: 1,
+                };
+                
+                detector = await handPoseDetection.createDetector(model, detectorConfig);
+                console.log('Hand detector created successfully');
+                isModelLoading = false;
+                document.getElementById('loading-message').style.display = 'none';
+                showToast("Hand tracking ready!", "Start moving your hands to play");
+            } catch (error) {
+                console.error('Error initializing hand detection:', error);
+                isModelLoading = false;
+                document.getElementById('loading-message').style.display = 'none';
+                document.getElementById('fallback-message').classList.remove('hidden');
+                showToast("Hand tracking unavailable", "Click buttons to play instead", "destructive");
+            }
+        }
+
+        async function initializeCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 }
+                });
+                video.srcObject = stream;
+                cameraReady = true;
+                document.getElementById('camera-error').classList.add('hidden');
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                document.getElementById('camera-error').classList.remove('hidden');
+                showToast("Camera Error", "Please allow camera access to play", "destructive");
+            }
+        }
+
+        function stopCamera() {
+            if (video && video.srcObject) {
+                const stream = video.srcObject;
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+        }
+
+        // Hand detection
+        function startHandDetection() {
+            if (!detector || !cameraReady) return;
+
+            const detectHands = async () => {
+                if (video && canvas && ctx) {
+                    try {
+                        const hands = await detector.estimateHands(video);
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        if (hands.length > 0) {
+                            const hand = hands[0];
+                            const gesture = interpretGesture(hand);
+                            currentGesture = gesture;
+                            
+                            // Draw hand landmarks
+                            hand.keypoints.forEach((keypoint) => {
+                                ctx.beginPath();
+                                ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+                                ctx.fillStyle = '#00ff00';
+                                ctx.fill();
+                            });
+                        } else {
+                            currentGesture = null;
+                        }
+                        
+                        updateGestureDisplay();
+                    } catch (error) {
+                        console.error('Hand detection error:', error);
+                    }
+                }
+            };
+
+            setInterval(detectHands, 100);
+        }
+
+        function interpretGesture(hand) {
+            const wrist = hand.keypoints[0];
+            const middleFinger = hand.keypoints[12];
+            
+            const videoWidth = 640;
+            const videoHeight = 480;
+            
+            const x = middleFinger.x / videoWidth;
+            const y = middleFinger.y / videoHeight;
+            
+            // Determine gesture based on position
+            if (y < 0.3) {
+                if (x < 0.3) return 'top-right';
+                if (x > 0.7) return 'top-left';
+                return 'top';
+            } else if (y > 0.7) {
+                if (x < 0.3) return 'bottom-right';
+                if (x > 0.7) return 'bottom-left';
+                return 'bottom';
+            } else {
+                if (x < 0.3) return 'right';
+                if (x > 0.7) return 'left';
+                return 'center';
+            }
+        }
+
+        function updateGestureDisplay() {
+            const gestureBadge = document.getElementById('gesture-badge');
+            if (gestureBadge) {
+                gestureBadge.textContent = currentGesture || "No gesture detected";
+                gestureBadge.className = `badge ${currentGesture ? 'badge-primary' : 'badge-secondary'} text-lg px-4 py-2`;
+            }
+        }
+
+        // Game logic
+        function handleGameAction() {
+            let playerGesture = currentGesture;
+            
+            // If no gesture detected or no detector, use random gesture
+            if (!playerGesture || !detector) {
+                const allGestures = ['left', 'right', 'center', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'];
+                playerGesture = allGestures[Math.floor(Math.random() * allGestures.length)];
+                
+                if (!detector) {
+                    showToast(`Using ${playerGesture} gesture`, "Hand tracking not available, using random gesture");
+                }
+            }
+
+            // Simulate opponent's choice (random for now)
+            const opponentGestures = ['left', 'right', 'center', 'top', 'bottom'];
+            const opponentChoice = opponentGestures[Math.floor(Math.random() * opponentGestures.length)];
+            
+            const isGoal = playerGesture !== opponentChoice;
+            
+            if (isGoal) {
+                score.kicker++;
+                showToast("GOAL! ⚽", gameRole === 'kicker' ? 'You scored!' : 'Goal conceded!');
+            } else {
+                showToast("SAVED! 🥅", gameRole === 'goalie' ? 'Great save!' : 'Shot blocked!');
+            }
+
+            // Check for game end
+            if (score.round >= score.maxRounds || score.kicker >= 5) {
+                endGame();
+            } else {
+                score.round++;
+                updateUI();
+            }
+        }
+
+        function endGame() {
+            gameState = 'finished';
+            showPage('end-page');
+            
+            const resultTitle = document.getElementById('result-title');
+            const finalScore = document.getElementById('final-score');
+            
+            if (score.kicker >= 5) {
+                resultTitle.textContent = "Kicker Wins! 🎉";
+            } else {
+                resultTitle.textContent = "Goalie Wins! 🥅";
+            }
+            
+            finalScore.textContent = `Final Score: Kicker ${score.kicker} - ${score.goalie} Goalie`;
+        }
+
+        function resetGame() {
+            score = { kicker: 0, goalie: 0, round: 1, maxRounds: 10 };
+            gameState = 'waiting';
+            currentGesture = null;
+            showPage('game-page');
+            updateUI();
+        }
+    </script>
+</body>
+</html>
