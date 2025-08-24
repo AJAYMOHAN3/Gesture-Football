@@ -390,44 +390,29 @@
                         </div>
                     </div>
 
-                    <!-- Game Controls -->
-                    <div class="card p-6 bg-white/90 backdrop-blur-sm">
-                        <h2 class="text-2xl font-bold mb-4">Game Controls</h2>
-                        
-                        <div class="mb-6">
-                            <h3 class="text-lg font-semibold mb-2">Current Gesture:</h3>
-                            <div class="badge badge-primary text-lg px-4 py-2" id="gesture-badge">
-                                No gesture detected
-                            </div>
-                        </div>
+                   <!-- Game Controls -->
+<div class="card p-6 bg-white/90 backdrop-blur-sm">
+    <h2 class="text-2xl font-bold mb-4">Game Controls</h2>
+    
+    <div class="mb-6">
+        <h3 class="text-lg font-semibold mb-2">Current Gesture:</h3>
+        <div class="badge badge-primary text-lg px-4 py-2" id="gesture-badge">
+            No gesture detected
+        </div>
+    </div>
 
-                        <div class="mb-6">
-                            <h3 class="text-lg font-semibold mb-2">Instructions:</h3>
-                            <p class="text-gray-600 mb-2" id="instructions">
-                                Move your hand to aim your shot!
-                            </p>
-                            <ul class="text-sm text-gray-500 space-y-1">
-                                <li>• Left/Right: Side positions</li>
-                                <li>• Top/Bottom: High/Low positions</li>
-                                <li>• Center: Middle position</li>
-                                <li>• Corners: Diagonal positions</li>
-                            </ul>
-                        </div>
+    <div class="mb-6">
+        <h3 class="text-lg font-semibold mb-2">Instructions:</h3>
+        <p class="text-gray-600 mb-2" id="instructions">
+            Use your hand to play!
+        </p>
+        <ul class="text-sm text-gray-500 space-y-1">
+            <li>• <b>Open Hand</b>: Kick (if Kicker) / Save (if Goalie)</li>
+            <li>• <b>Closed Fist</b>: Idle / Reset</li>
+        </ul>
+    </div>
+</div>
 
-                        <div class="space-y-4">
-                            <button 
-                                id="action-button"
-                                class="btn btn-kicker btn-xl w-full"
-                                onclick="handleGameAction()"
-                            >
-                                ⚽ KICK!
-                            </button>
-                            
-                            <div id="fallback-message" class="text-center text-sm text-gray-500 hidden">
-                                <p>Hand tracking not available. Click the button to use random gestures.</p>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -458,15 +443,23 @@
     </div>
 
     <!-- Toast Container -->
-    <div id="toast-container"></div>
+    <div id="toast-container" 
+     style="position: fixed; top: 50%; right: 20px; transform: translateY(-50%); z-index: 9999; min-width: 220px; max-width: 320px; padding: 8px;">
+</div>
+
+
+
+
 
     <script>
         // Game State
-        let currentPage = 'landing';
+        let currentPage = 'landing'; 
         let gameRole = 'kicker';
         let gameState = 'waiting';
         let score = { kicker: 0, goalie: 0, round: 1, maxRounds: 10 };
-        let currentGesture = null;
+       let previousGesture = null;
+let gestureCooldown = false; // prevent spamming
+
         let detector = null;
         let isModelLoading = true;
         let cameraReady = false;
@@ -634,75 +627,118 @@
             setInterval(detectHands, 100);
         }
 
-        function interpretGesture(hand) {
-            const wrist = hand.keypoints[0];
-            const middleFinger = hand.keypoints[12];
-            
-            const videoWidth = 640;
-            const videoHeight = 480;
-            
-            const x = middleFinger.x / videoWidth;
-            const y = middleFinger.y / videoHeight;
-            
-            // Determine gesture based on position
-            if (y < 0.3) {
-                if (x < 0.3) return 'top-right';
-                if (x > 0.7) return 'top-left';
-                return 'top';
-            } else if (y > 0.7) {
-                if (x < 0.3) return 'bottom-right';
-                if (x > 0.7) return 'bottom-left';
-                return 'bottom';
-            } else {
-                if (x < 0.3) return 'right';
-                if (x > 0.7) return 'left';
-                return 'center';
-            }
+      function interpretGesture(hand) {
+    if (!hand.keypoints) return null;
+
+    // --- Finger Open/Closed Detection ---
+    const fingerTips = [4, 8, 12, 16, 20];  // Thumb, Index, Middle, Ring, Pinky tips
+    const fingerBases = [2, 6, 10, 14, 18]; // Knuckles
+
+    let openFingers = 0;
+
+    for (let i = 1; i < fingerTips.length; i++) { // skip thumb for simplicity
+        if (hand.keypoints[fingerTips[i]].y < hand.keypoints[fingerBases[i]].y) {
+            openFingers++;
+        }
+    }
+
+    // Thumb check (x-axis)
+    if (hand.keypoints[fingerTips[0]].x > hand.keypoints[fingerBases[0]].x) {
+        openFingers++;
+    }
+
+    const handState = openFingers >= 4 ? "open" : "closed";
+
+    // --- Position Detection (based on middle finger tip) ---
+    const videoWidth = 640;
+    const videoHeight = 480;
+    const middleFinger = hand.keypoints[12];
+    const x = middleFinger.x / videoWidth;
+    const y = middleFinger.y / videoHeight;
+
+    let position = "center";
+    if (y < 0.3) {
+        if (x < 0.3) position = "top-right";
+        else if (x > 0.7) position = "top-left";
+        else position = "top";
+    } else if (y > 0.7) {
+        if (x < 0.3) position = "bottom-right";
+        else if (x > 0.7) position = "bottom-left";
+        else position = "bottom";
+    } else {
+        if (x < 0.3) position = "right";
+        else if (x > 0.7) position = "left";
+    }
+
+    return { handState, position };
+}
+
+
+   function updateGestureDisplay() {
+    const gestureBadge = document.getElementById('gesture-badge');
+    if (gestureBadge) {
+        if (currentGesture) {
+            gestureBadge.textContent = 
+                `${currentGesture.handState === "open" ? "Open Hand" : "Closed Fist"} (${currentGesture.position})`;
+            gestureBadge.className = "badge badge-primary text-lg px-4 py-2";
+        } else {
+            gestureBadge.textContent = "No gesture detected";
+            gestureBadge.className = "badge badge-secondary text-lg px-4 py-2";
+        }
+    }
+
+    // Fire only when closed → open transition
+    if (!gestureCooldown && previousGesture !== "open" && currentGesture?.handState === "open") {
+        if (gameRole === 'kicker') {
+            handleGameAction("kick", currentGesture.position);
+        } else if (gameRole === 'goalie') {
+            handleGameAction("save", currentGesture.position);
         }
 
-        function updateGestureDisplay() {
-            const gestureBadge = document.getElementById('gesture-badge');
-            if (gestureBadge) {
-                gestureBadge.textContent = currentGesture || "No gesture detected";
-                gestureBadge.className = `badge ${currentGesture ? 'badge-primary' : 'badge-secondary'} text-lg px-4 py-2`;
-            }
-        }
+        gestureCooldown = true;
+        setTimeout(() => {
+            gestureCooldown = false;
+        }, 1500);
+    }
+
+    previousGesture = currentGesture?.handState;
+}
+
+
 
         // Game logic
-        function handleGameAction() {
-            let playerGesture = currentGesture;
-            
-            // If no gesture detected or no detector, use random gesture
-            if (!playerGesture || !detector) {
-                const allGestures = ['left', 'right', 'center', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'];
-                playerGesture = allGestures[Math.floor(Math.random() * allGestures.length)];
-                
-                if (!detector) {
-                    showToast(`Using ${playerGesture} gesture`, "Hand tracking not available, using random gesture");
-                }
-            }
+      function handleGameAction(actionType, position = "center") {
+    // Opponent random choice
+    const opponentGestures = ['left', 'right', 'center', 'top', 'bottom'];
+    const opponentChoice = opponentGestures[Math.floor(Math.random() * opponentGestures.length)];
 
-            // Simulate opponent's choice (random for now)
-            const opponentGestures = ['left', 'right', 'center', 'top', 'bottom'];
-            const opponentChoice = opponentGestures[Math.floor(Math.random() * opponentGestures.length)];
-            
-            const isGoal = playerGesture !== opponentChoice;
-            
-            if (isGoal) {
-                score.kicker++;
-                showToast("GOAL! ⚽", gameRole === 'kicker' ? 'You scored!' : 'Goal conceded!');
-            } else {
-                showToast("SAVED! 🥅", gameRole === 'goalie' ? 'Great save!' : 'Shot blocked!');
-            }
+    let isGoal = false, isSave = false;
 
-            // Check for game end
-            if (score.round >= score.maxRounds || score.kicker >= 5) {
-                endGame();
-            } else {
-                score.round++;
-                updateUI();
-            }
-        }
+    if (actionType === "kick") {
+        isGoal = position !== opponentChoice; 
+    } else if (actionType === "save") {
+        isSave = position === opponentChoice; 
+    }
+
+    if (isGoal) {
+        score.kicker++;
+        showToast("GOAL! ⚽", `Shot to ${position}`, "success");
+    } else if (isSave) {
+        score.goalie++;
+        showToast("SAVED! 🥅", `Blocked ${position}`, "info");
+    } else {
+        showToast("MISS!", `Ball went ${position}`, "warning");
+    }
+
+    if (score.round >= score.maxRounds || score.kicker >= 5 || score.goalie >= 5) {
+        endGame();
+    } else {
+        score.round++;
+        updateUI();
+    }
+}
+
+
 
         function endGame() {
             gameState = 'finished';
